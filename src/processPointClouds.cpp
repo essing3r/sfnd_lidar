@@ -2,6 +2,7 @@
 
 #include "processPointClouds.h"
 
+#include <pcl/point_types.h>
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/extract_indices.h>
@@ -42,8 +43,17 @@ template <typename PointT>
 std::pair<typename pcl::PointCloud<PointT>::Ptr, typename pcl::PointCloud<PointT>::Ptr> ProcessPointClouds<PointT>::SeparateClouds(pcl::PointIndices::Ptr inliers, typename pcl::PointCloud<PointT>::Ptr cloud)
 {
     // TODO: Create two new point clouds, one cloud with obstacles and other with segmented plane
+    pcl::ExtractIndices<PointT> extract;
+    typename pcl::PointCloud<PointT>::Ptr inlier_cloud(new pcl::PointCloud<PointT>());
+    typename pcl::PointCloud<PointT>::Ptr outlier_cloud(new pcl::PointCloud<PointT>());
+    extract.setInputCloud(cloud);
+    extract.setIndices(inliers);
+    extract.setNegative(false);
+    extract.filter(*inlier_cloud);
 
-    std::pair<typename pcl::PointCloud<PointT>::Ptr, typename pcl::PointCloud<PointT>::Ptr> segResult(cloud, cloud);
+    extract.setNegative(true);
+    extract.filter(*outlier_cloud);
+    std::pair<typename pcl::PointCloud<PointT>::Ptr, typename pcl::PointCloud<PointT>::Ptr> segResult(outlier_cloud, inlier_cloud);
     return segResult;
 }
 
@@ -53,12 +63,12 @@ std::pair<typename pcl::PointCloud<PointT>::Ptr, typename pcl::PointCloud<PointT
     // Time segmentation process
     auto startTime = std::chrono::steady_clock::now();
     // TODO:: Fill in this function to find inliers for the cloud.
-    pcl::PointIndices downsampled_indices;
-    pcl::VoxelGrid<CloudT> downsampler;
+    typename pcl::PointCloud<PointT>::Ptr downsampled_cloud(new pcl::PointCloud<PointT>());
+    pcl::VoxelGrid<PointT > downsampler;
     downsampler.setInputCloud(cloud);
-    downsampler.setLeafSize(0.01f, 0.01f, 0.01f);
-    downsampler.filter(downsampled_indices);
-
+    downsampler.setLeafSize(0.1f, 0.1f, 0.1f);
+    downsampler.filter(*downsampled_cloud);
+    std::cout << "Cloud decimated to " << downsampled_cloud->points.size() << " from " << cloud->points.size() << std::endl;
     pcl::SACSegmentation<PointT> segmentation;
     segmentation.setOptimizeCoefficients(true);
     segmentation.setModelType(pcl::SACMODEL_PLANE);
@@ -66,18 +76,16 @@ std::pair<typename pcl::PointCloud<PointT>::Ptr, typename pcl::PointCloud<PointT
     segmentation.setMaxIterations(maxIterations);
     segmentation.setDistanceThreshold(distanceThreshold);
 
-    segmentation.setInputCloud(cloud);
-    segmentation.setIndices(downsampled_indices);
+    segmentation.setInputCloud(downsampled_cloud);
 
     pcl::PointIndices::Ptr inliers(new pcl::PointIndices());
     pcl::ModelCoefficients coefficients;
     segmentation.segment(*inliers, coefficients);
-
-    std::pair<typename pcl::PointCloud<PointT>::Ptr, typename pcl::PointCloud<PointT>::Ptr> segResult = SeparateClouds(inliers, cloud);
+    std::cout << "Plane segmentation resulted in " << inliers->indices.size() << " inliers with plane parameters " << coefficients << std::endl;
+    std::pair<typename pcl::PointCloud<PointT>::Ptr, typename pcl::PointCloud<PointT>::Ptr> segResult = SeparateClouds(inliers, downsampled_cloud);
     auto endTime = std::chrono::steady_clock::now();
     auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
     std::cout << "plane segmentation took " << elapsedTime.count() << " milliseconds" << std::endl;
-
     return segResult;
 }
 

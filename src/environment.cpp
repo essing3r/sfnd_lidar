@@ -5,6 +5,7 @@
 #include "sensors/lidar.h"
 #include "render/render.h"
 #include "processPointClouds.h"
+#include <pcl/point_types.h>
 // using templates for processPointClouds so also include .cpp to help linker
 #include "processPointClouds.cpp"
 
@@ -42,17 +43,21 @@ void simpleHighway(pcl::visualization::PCLVisualizer::Ptr& viewer)
     // ----------------------------------------------------
     
     // RENDER OPTIONS
-    bool renderScene = true;
+    bool renderScene = false;
     std::vector<Car> cars = initHighway(renderScene, viewer);
     
     // TODO:: Create lidar sensor 
     Lidar::Ptr lidar = std::make_shared<Lidar>(cars, 0.);
 
-    typedef pcl::PointCloud<pcl::PointXYZ> XYZPointCloud;
-    XYZPointCloud::Ptr lidar_cloud = lidar->scan();
-    renderRays(viewer, lidar->position, lidar_cloud);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr lidar_cloud = lidar->scan();
+    //renderRays(viewer, lidar->position, lidar_cloud);
+    //renderPointCloud(viewer, lidar_cloud, "lidar_cloud");
     // TODO:: Create point processor
-  
+    ProcessPointClouds<pcl::PointXYZ> processor;
+    std::pair<pcl::PointCloud<pcl::PointXYZ>::Ptr, pcl::PointCloud<pcl::PointXYZ>::Ptr> obstacle_ground_pointclouds;
+    obstacle_ground_pointclouds = processor.SegmentPlane(lidar_cloud, 1000, 0.2f);
+    renderPointCloud(viewer, obstacle_ground_pointclouds.first, "obstacles", Color(1,0,0));
+    renderPointCloud(viewer, obstacle_ground_pointclouds.second, "ground", Color(0,1,0));
 }
 
 
