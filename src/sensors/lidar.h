@@ -71,7 +71,7 @@ struct Ray
 
 struct Lidar
 {
-
+	typedef std::shared_ptr<Lidar> Ptr;
 	std::vector<Ray> rays;
 	pcl::PointCloud<pcl::PointXYZ>::Ptr cloud;
 	std::vector<Car> cars;
