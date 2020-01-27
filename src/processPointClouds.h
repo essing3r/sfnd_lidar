@@ -22,7 +22,7 @@
 template<typename PointT>
 class ProcessPointClouds {
 public:
-
+    typedef pcl::PointCloud<PointT> CloudT;
     //constructor
     ProcessPointClouds();
     //deconstructor
