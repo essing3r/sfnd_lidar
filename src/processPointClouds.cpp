@@ -8,6 +8,8 @@
 #include <pcl/filters/extract_indices.h>
 #include <pcl/sample_consensus/method_types.h>
 #include <pcl/sample_consensus/model_types.h>
+#include <pcl/kdtree/kdtree.h>
+#include <pcl/segmentation/extract_clusters.h>
 
 //constructor:
 template <typename PointT>
@@ -87,6 +89,11 @@ static std::unordered_set<int> PlaneRansac(pcl::PointCloud<pcl::PointXYZ>::Ptr c
 
         for (int j = 0; j < num_points; ++j)
         {
+            if (inliers.count(j) > 0)
+            {
+                continue;
+            }
+            
             const pcl::PointXYZ &p = cloud->points[j];
             const float d = std::abs(A * p.x + B * p.y + C * p.z) / N;
             if (d < distanceTol)
@@ -167,8 +174,31 @@ std::vector<typename pcl::PointCloud<PointT>::Ptr> ProcessPointClouds<PointT>::C
     auto startTime = std::chrono::steady_clock::now();
 
     std::vector<typename pcl::PointCloud<PointT>::Ptr> clusters;
+    pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>);
+    tree->setInputCloud(cloud);
 
-    // TODO:: Fill in the function to perform euclidean clustering to group detected obstacles
+    std::vector<pcl::PointIndices> cluster_indices;
+    pcl::EuclideanClusterExtraction<pcl::PointXYZ> ec;
+    ec.setClusterTolerance( clusterTolerance );
+    ec.setMinClusterSize(minSize);
+    ec.setMaxClusterSize(maxSize);
+    ec.setSearchMethod(tree);
+    ec.setInputCloud(cloud);
+    ec.extract(cluster_indices);
+    for (const auto& indices : cluster_indices)
+    {
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_cluster(new pcl::PointCloud<pcl::PointXYZ>);
+        cloud_cluster->points.resize(indices.indices.size());
+        size_t j = 0;
+        for (auto i : indices.indices)
+        {
+            cloud_cluster->points[j++] = cloud->points[i];
+        }
+        cloud_cluster->width = cloud_cluster->points.size();
+        cloud_cluster->height = 1;
+        cloud_cluster->is_dense = true;
+        clusters.push_back(cloud_cluster);
+    }
 
     auto endTime = std::chrono::steady_clock::now();
     auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
