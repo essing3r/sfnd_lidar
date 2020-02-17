@@ -6,10 +6,12 @@
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/extract_indices.h>
+#include <pcl/filters/crop_box.h>
 #include <pcl/sample_consensus/method_types.h>
 #include <pcl/sample_consensus/model_types.h>
 #include <pcl/kdtree/kdtree.h>
 #include <pcl/segmentation/extract_clusters.h>
+#include <Eigen/Dense>
 
 //constructor:
 template <typename PointT>
@@ -32,13 +34,31 @@ typename pcl::PointCloud<PointT>::Ptr ProcessPointClouds<PointT>::FilterCloud(ty
     // Time segmentation process
     auto startTime = std::chrono::steady_clock::now();
 
-    // TODO:: Fill in the function to do voxel grid point reduction and region based filtering
+    typename pcl::PointCloud<PointT>::Ptr downsampled_cloud(new pcl::PointCloud<PointT>());
+    pcl::VoxelGrid<PointT> downsampler;
+    downsampler.setInputCloud(cloud);
+    downsampler.setLeafSize(filterRes, filterRes, filterRes);
+    downsampler.filter(*downsampled_cloud);
+
+    typename pcl::PointCloud<PointT>::Ptr filtered_cloud(new pcl::PointCloud<PointT>());
+    pcl::CropBox<PointT> cropper;
+    cropper.setMin(minPoint);
+    cropper.setMax(maxPoint);
+    cropper.setInputCloud(downsampled_cloud);
+    cropper.filter(*filtered_cloud);
+
+    pcl::CropBox<PointT> roof_cropper;
+    roof_cropper.setMin(Eigen::Vector4f(-1.5, -2.0, -2.0, 1));
+    roof_cropper.setMax(Eigen::Vector4f(3, 2.0, 1.0, 1));
+    roof_cropper.setNegative(true);
+    roof_cropper.setInputCloud(filtered_cloud);
+    typename pcl::PointCloud<PointT>::Ptr roof_filtered_cloud(new pcl::PointCloud<PointT>());
+    roof_cropper.filter(*roof_filtered_cloud);
 
     auto endTime = std::chrono::steady_clock::now();
     auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
     std::cout << "filtering took " << elapsedTime.count() << " milliseconds" << std::endl;
-
-    return cloud;
+    return roof_filtered_cloud;
 }
 
 template <typename PointT>
