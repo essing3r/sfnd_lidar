@@ -12,6 +12,158 @@
 #include <pcl/kdtree/kdtree.h>
 #include <pcl/segmentation/extract_clusters.h>
 #include <Eigen/Dense>
+#include <queue>
+// Structure to represent node of kd tree
+struct Node
+{
+    std::vector<float> point;
+    int id;
+    Node *left;
+    Node *right;
+
+    Node(std::vector<float> arr, int setId)
+        : point(arr), id(setId), left(NULL), right(NULL)
+    {
+    }
+};
+
+struct NodeSearchQuery
+{
+    std::vector<float> point;
+    std::vector<std::pair<float, float>> box;
+    float radius;
+
+    NodeSearchQuery(const std::vector<float> &point, float radius)
+        : point(point), radius(radius)
+    {
+
+        box.resize(point.size());
+        for (size_t i = 0; i < point.size(); ++i)
+        {
+            box[i].first = point[i] - radius;
+            box[i].second = point[i] + radius;
+        }
+    }
+
+    inline bool PointInsideRadius(const std::vector<float> &other) const
+    {
+        float distance_squared = 0.;
+        for (size_t i = 0; i < std::min(point.size(), other.size()); ++i)
+        {
+            distance_squared += (point[i] - other[i]) * (point[i] - other[i]);
+        }
+        return std::sqrt(distance_squared) <= radius;
+    }
+
+    inline bool PointInsideBox(const std::vector<float> &other) const
+    {
+        bool inside_box = true;
+        for (size_t i = 0; i < std::min(point.size(), other.size()); ++i)
+        {
+            inside_box &= !(other[i] > box[i].second) && !(other[i] < box[i].first);
+        }
+        return inside_box;
+    }
+};
+
+struct KdTree
+{
+    Node *root;
+
+    KdTree()
+        : root(NULL)
+    {
+    }
+
+    void insert(const std::vector<float> &point, int id)
+    {
+        Node *new_node = new Node(point, id);
+        insertNodeRecursive(new_node, &root, 0);
+    }
+
+    void insertNodeRecursive(Node *node, Node **tree, int depth)
+    {
+        if (*tree == NULL)
+        {
+            *tree = node;
+            return;
+        }
+
+        const size_t index = depth % node->point.size();
+        const bool node_is_less_than = (node->point[index] < (*tree)->point[index]);
+        tree = (node_is_less_than ? &(*tree)->left : &(*tree)->right);
+        return insertNodeRecursive(node, tree, depth + 1);
+    }
+
+    // return a list of point ids in the tree that are within distance of target
+    std::vector<int> search(std::vector<float> target, float distanceTol)
+    {
+        std::vector<int> ids;
+        NodeSearchQuery query(target, distanceTol);
+        searchNodeRecursive(root, query, 0, &ids);
+        return ids;
+    }
+
+    void searchNodeRecursive(const Node *node, const NodeSearchQuery &query, size_t depth, std::vector<int> *ids)
+    {
+        if (node == NULL)
+            return;
+
+        if (query.PointInsideBox(node->point))
+        {
+            if (query.PointInsideRadius(node->point))
+            {
+                ids->push_back(node->id);
+            }
+        }
+
+        const size_t index = depth % query.point.size();
+        if (query.box[index].first < node->point[index])
+            searchNodeRecursive(node->left, query, depth + 1, ids);
+        if (query.box[index].second > node->point[index])
+            searchNodeRecursive(node->right, query, depth + 1, ids);
+    }
+};
+
+static void Proximity(const std::vector<std::vector<float>> &points, int seed, KdTree *tree, float distanceTol, std::vector<int> *cluster, std::vector<bool> &point_processed)
+{
+    std::queue<int> points_to_check;
+    points_to_check.push(seed);
+
+    while (!points_to_check.empty())
+    {
+        const int p = points_to_check.front();
+        points_to_check.pop();
+        if (point_processed[p])
+            continue;
+        cluster->push_back(p);
+        point_processed[p] = true;
+        std::vector<int> nearby_points = tree->search(points[p], distanceTol);
+        for (int nearby_i : nearby_points)
+        {
+            if (!point_processed[nearby_i])
+            {
+                points_to_check.push(nearby_i);
+            }
+        }
+    }
+}
+
+static std::vector<std::vector<int>> euclideanCluster(const std::vector<std::vector<float>> &points, KdTree *tree, float distanceTol)
+{
+    std::vector<std::vector<int>> clusters;
+    std::vector<bool> point_processed(points.size(), false);
+    for (size_t i = 0; i < points.size(); ++i)
+    {
+        if (!point_processed[i])
+        {
+            std::vector<int> new_cluster;
+            Proximity(points, i, tree, distanceTol, &new_cluster, point_processed);
+            clusters.push_back(new_cluster);
+        }
+    }
+    return clusters;
+}
 
 //constructor:
 template <typename PointT>
@@ -210,7 +362,7 @@ std::pair<typename pcl::PointCloud<PointT>::Ptr, typename pcl::PointCloud<PointT
 {
     auto startTime = std::chrono::steady_clock::now();
     pcl::PointIndices::Ptr inliers(new pcl::PointIndices());
-    inliers->indices = PlaneRansac<PointT>(cloud, maxIterations, distanceThreshold);
+    inliers->indices = PlaneRansacEigen<PointT>(cloud, maxIterations, distanceThreshold);
     std::cout << "Plane segmentation resulted in " << inliers->indices.size() << " inliers " << std::endl;
 
     auto endTime = std::chrono::steady_clock::now();
@@ -254,6 +406,46 @@ std::pair<typename pcl::PointCloud<PointT>::Ptr, typename pcl::PointCloud<PointT
     auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
     std::cout << "pcl plane segmentation took " << elapsedTime.count() << " milliseconds" << std::endl;
     return segResult;
+}
+
+template <typename PointT>
+std::vector<typename pcl::PointCloud<PointT>::Ptr> ProcessPointClouds<PointT>::ClusteringNoPCL(typename pcl::PointCloud<PointT>::Ptr cloud, float clusterTolerance, int minSize, int maxSize)
+{
+    auto startTime = std::chrono::steady_clock::now();
+    // build kdtree and do the clustering
+    KdTree *tree = new KdTree;
+    std::vector<std::vector<float>> points;
+    for (const PointT &p : cloud->points)
+    {
+        points.push_back({p.x, p.y, p.z});
+        tree->insert(points.back(), points.size() - 1);
+    }
+    std::vector<std::vector<int>> cluster_indices = euclideanCluster(points, tree,clusterTolerance);
+    delete tree;
+    // convert the cluster indices back into separate pointclouds
+    std::vector<typename pcl::PointCloud<PointT>::Ptr> clusters;
+    for (const auto &indices : cluster_indices)
+    {
+        if (indices.size() < minSize || indices.size() > maxSize)
+            continue;
+        typename pcl::PointCloud<PointT>::Ptr cloud_cluster(new pcl::PointCloud<PointT>);
+        cloud_cluster->points.resize(indices.size());
+        size_t j = 0;
+        for (auto i : indices)
+        {
+            cloud_cluster->points[j++] = cloud->points[i];
+        }
+        cloud_cluster->width = cloud_cluster->points.size();
+        cloud_cluster->height = 1;
+        cloud_cluster->is_dense = true;
+        clusters.push_back(cloud_cluster);
+    }
+
+    auto endTime = std::chrono::steady_clock::now();
+    auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+    std::cout << "clustering took " << elapsedTime.count() << " milliseconds and found " << clusters.size() << " clusters" << std::endl;
+
+    return clusters;
 }
 
 template <typename PointT>
