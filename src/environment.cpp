@@ -38,7 +38,7 @@ std::vector<Car> initHighway(bool renderScene, pcl::visualization::PCLVisualizer
 template<typename PointT>
 void cityBlock(pcl::visualization::PCLVisualizer::Ptr &viewer, ProcessPointClouds<PointT>* processor, typename pcl::PointCloud<PointT>::Ptr& cloud)
 {
-    typename pcl::PointCloud<PointT>::Ptr filtered_cloud = processor->FilterCloud(cloud, 0.1f, Eigen::Vector4f (-10.0, -4.0, -4.0, 1), Eigen::Vector4f (30.0, 7.0, 4.0, 1));
+    typename pcl::PointCloud<PointT>::Ptr filtered_cloud = processor->FilterCloud(cloud, 0.1f, Eigen::Vector4f (-10.0, -4.0, -4.0, 1), Eigen::Vector4f (30.0, 7.0, 10.0, 1));
     std::pair<typename pcl::PointCloud<PointT>::Ptr, typename pcl::PointCloud<PointT>::Ptr> obstacle_ground_pointclouds;
     obstacle_ground_pointclouds = processor->SegmentPlane(filtered_cloud, 30, 0.2f);
     //renderPointCloud(viewer, obstacle_ground_pointclouds.first, "obstacles", Color(1,0,0));
