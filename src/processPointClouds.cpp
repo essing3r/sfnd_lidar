@@ -79,7 +79,8 @@ std::pair<typename pcl::PointCloud<PointT>::Ptr, typename pcl::PointCloud<PointT
     return segResult;
 }
 
-static std::unordered_set<int> PlaneRansac(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, int maxIterations, float distanceTol)
+template <typename PointT>
+std::vector<int> PlaneRansac(typename pcl::PointCloud<PointT>::Ptr cloud, int maxIterations, float distanceTol)
 {
 
     // Time ransac
@@ -97,9 +98,9 @@ static std::unordered_set<int> PlaneRansac(pcl::PointCloud<pcl::PointXYZ>::Ptr c
             inliers.insert(rand() % num_points);
         }
         auto it = inliers.begin();
-        const pcl::PointXYZ &p1 = cloud->points[*(it++)];
-        const pcl::PointXYZ &p2 = cloud->points[*(it++)];
-        const pcl::PointXYZ &p3 = cloud->points[*(it++)];
+        const PointT &p1 = cloud->points[*(it++)];
+        const PointT &p2 = cloud->points[*(it++)];
+        const PointT &p3 = cloud->points[*(it++)];
 
         const float A = (p2.y - p1.y) * (p3.z - p1.z) - (p2.z - p1.z) * (p3.y - p1.y);
         const float B = (p2.z - p1.z) * (p3.x - p1.x) - (p2.x - p1.x) * (p3.z - p1.z);
@@ -109,13 +110,8 @@ static std::unordered_set<int> PlaneRansac(pcl::PointCloud<pcl::PointXYZ>::Ptr c
 
         for (int j = 0; j < num_points; ++j)
         {
-            if (inliers.count(j) > 0)
-            {
-                continue;
-            }
-            
-            const pcl::PointXYZ &p = cloud->points[j];
-            const float d = std::abs(A * p.x + B * p.y + C * p.z) / N;
+            const PointT &p = cloud->points[j];
+            const float d = std::abs(A * p.x + B * p.y + C * p.z + D) / N;
             if (d < distanceTol)
             {
                 inliers.insert(j);
@@ -131,7 +127,82 @@ static std::unordered_set<int> PlaneRansac(pcl::PointCloud<pcl::PointXYZ>::Ptr c
     auto endTime = std::chrono::steady_clock::now();
     auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
     std::cout << "plane ransac took " << elapsedTime.count() << " milliseconds" << std::endl;
-    return inliersResult;
+    std::vector<int> indices;
+    std::copy(inliersResult.begin(), inliersResult.end(), std::back_inserter(indices));
+    return indices;
+}
+
+template <typename PointT>
+std::vector<int> PlaneRansacEigen(typename pcl::PointCloud<PointT>::Ptr cloud, int maxIterations, float distanceTol)
+{
+
+    // Time ransac
+    auto startTime = std::chrono::steady_clock::now();
+
+    srand(time(NULL));
+
+    std::vector<int> inliers;
+    const size_t num_points = cloud->points.size();
+    std::cout << "num_points: " << num_points << std::endl;
+
+    Eigen::ArrayXf best_inliers;
+    size_t num_best_inliers = 0;
+    float best_distanceTolN;
+
+    while (maxIterations--)
+    {
+        std::unordered_set<int> samples;
+        while (samples.size() < 3)
+        {
+            const int point_index = rand() % num_points;
+            samples.insert(point_index);
+        }
+        auto it = samples.begin();
+        const PointT &p1 = cloud->points[*(it++)];
+        const PointT &p2 = cloud->points[*(it++)];
+        const PointT &p3 = cloud->points[*(it++)];
+
+        const float A = (p2.y - p1.y) * (p3.z - p1.z) - (p2.z - p1.z) * (p3.y - p1.y);
+        const float B = (p2.z - p1.z) * (p3.x - p1.x) - (p2.x - p1.x) * (p3.z - p1.z);
+        const float C = (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x);
+        const float D = -(A * p1.x + B * p1.y + C * p1.z);
+        const float N = std::sqrt(A * A + B * B + C * C);
+        const float distanceTolN = distanceTol * N;
+        Eigen::MatrixXf point_mat(num_points, 4);
+        for (int j = 0; j < num_points; ++j)
+        {
+            const PointT &p = cloud->points[j];
+            point_mat.row(j) << p.x, p.y, p.z, 1.f;
+        }
+        //std::cout << "point mat : \n" << point_mat << std::endl;
+        const Eigen::Vector4f plane(A, B, C, D);
+        const Eigen::ArrayXf point_distancesN = (point_mat * plane);
+        //std::cout << "pont d : \n" << point_distancesN.abs() << " > " << distanceTolN << std::endl;
+
+        size_t num_sample_inliers = (point_distancesN.abs() < distanceTolN).count();
+        if (num_sample_inliers > num_best_inliers)
+        {
+            best_inliers = point_distancesN;
+            best_distanceTolN = distanceTolN;
+            num_best_inliers = num_sample_inliers;
+        }
+    }
+
+    auto endTime = std::chrono::steady_clock::now();
+    auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+    std::cout << "plane ransac took " << elapsedTime.count() << " milliseconds" << std::endl;
+
+    std::vector<int> inliners;
+
+    if (num_best_inliers > 0)
+    {
+        for (int j = 0; j < num_points; ++j)
+        {
+            if (best_inliers(j, 0) < best_distanceTolN)
+                inliers.push_back(j);
+        }
+    }
+    return inliers;
 }
 
 template <typename PointT>
@@ -139,8 +210,7 @@ std::pair<typename pcl::PointCloud<PointT>::Ptr, typename pcl::PointCloud<PointT
 {
     auto startTime = std::chrono::steady_clock::now();
     pcl::PointIndices::Ptr inliers(new pcl::PointIndices());
-    std::unordered_set<int> indices = PlaneRansac(cloud, maxIterations, distanceThreshold);
-    std::copy(indices.begin(), indices.end(), std::back_inserter(inliers->indices));
+    inliers->indices = PlaneRansac<PointT>(cloud, maxIterations, distanceThreshold);
     std::cout << "Plane segmentation resulted in " << inliers->indices.size() << " inliers " << std::endl;
 
     auto endTime = std::chrono::steady_clock::now();
@@ -194,20 +264,20 @@ std::vector<typename pcl::PointCloud<PointT>::Ptr> ProcessPointClouds<PointT>::C
     auto startTime = std::chrono::steady_clock::now();
 
     std::vector<typename pcl::PointCloud<PointT>::Ptr> clusters;
-    pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>);
+    typename pcl::search::KdTree<PointT>::Ptr tree(new pcl::search::KdTree<PointT>);
     tree->setInputCloud(cloud);
 
     std::vector<pcl::PointIndices> cluster_indices;
-    pcl::EuclideanClusterExtraction<pcl::PointXYZ> ec;
-    ec.setClusterTolerance( clusterTolerance );
+    pcl::EuclideanClusterExtraction<PointT> ec;
+    ec.setClusterTolerance(clusterTolerance);
     ec.setMinClusterSize(minSize);
     ec.setMaxClusterSize(maxSize);
     ec.setSearchMethod(tree);
     ec.setInputCloud(cloud);
     ec.extract(cluster_indices);
-    for (const auto& indices : cluster_indices)
+    for (const auto &indices : cluster_indices)
     {
-        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_cluster(new pcl::PointCloud<pcl::PointXYZ>);
+        typename pcl::PointCloud<PointT>::Ptr cloud_cluster(new pcl::PointCloud<PointT>);
         cloud_cluster->points.resize(indices.indices.size());
         size_t j = 0;
         for (auto i : indices.indices)

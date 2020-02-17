@@ -108,7 +108,7 @@ std::unordered_set<int> PlaneRansac(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, i
 	return inliersResult;
 }
 
-std::unordered_set<int> Ransac(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, int maxIterations, float distanceTol)
+std::vector<int> Ransac(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, int maxIterations, float distanceTol)
 {
 
 	// Time ransac
@@ -151,7 +151,8 @@ std::unordered_set<int> Ransac(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, int ma
 	auto endTime = std::chrono::steady_clock::now();
 	auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
 	std::cout << "ransac took " << elapsedTime.count() << " milliseconds" << std::endl;
-	return inliersResult;
+
+	return indices;
 }
 
 int main()
